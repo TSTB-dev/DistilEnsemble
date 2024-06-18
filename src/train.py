@@ -37,7 +37,7 @@ def get_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--log_interval", type=int, default=100)
     parser.add_argument("--proj_name", type=str, default="distil_ensemble")
-    parser.add_argument("--save_dir", type=str, default="models")
+    parser.add_argument("--parent_resume", type=str, default="")
 
     args = parser.parse_args()
     return args
@@ -93,35 +93,40 @@ def train(args):
     else:
         raise ValueError("Invalid scheduler")
     
-    log.info("Starting Parent Model Training...")
     loss_fn = nn.CrossEntropyLoss()
-    model_p.train()
-    for epoch in range(args.parent_epochs):
-        for i, (inputs, targets) in enumerate(train_loader):
-            inputs, targets = inputs.to(device), targets.to(device)
-            
-            optimizer_p.zero_grad()
-            outputs = model_p(inputs) # (B, num_classes)
-            loss = loss_fn(outputs.view(-1, outputs.size(-1)), targets.repeat_interleave(outputs.size(1))).mean()
-            loss.backward()
-            optimizer_p.step()
-            scheduler_p.step()
-            
-            if i % args.log_interval == 0:
-                log.info(f"Epoch: {epoch}/{args.parent_epochs}, Iter: {i}/{num_iters_per_epoch}, Loss: {loss.item()}")
-                wandb.log({"loss": loss.item()})
-    log.info("Parent Model Training finished")
-    
-    save_path = os.path.join(f"{wandb.run.dir}", f"{args.dataset}_{args.model}_parent.pth")
-    torch.save(model_p.state_dict(), save_path)
-    log.info(f"Parenet Model saved to {save_path}")
+    if args.parent_resume:
+        log.info(f"Resuming Parent Model from {args.parent_resume}")
+        model_p.load_state_dict(torch.load(args.parent_resume))
+        log.info("Parent Model Resumed. Skipping Parent Model Training...")
+    else:
+        log.info("Starting Parent Model Training...")
+        model_p.train()
+        for epoch in range(args.parent_epochs):
+            for i, (inputs, targets) in enumerate(train_loader):
+                inputs, targets = inputs.to(device), targets.to(device)
+                
+                optimizer_p.zero_grad()
+                outputs = model_p(inputs) # (B, num_classes)
+                loss = loss_fn(outputs, targets)
+                loss.backward()
+                optimizer_p.step()
+                scheduler_p.step()
+                
+                if i % args.log_interval == 0:
+                    log.info(f"Epoch: {epoch}/{args.parent_epochs}, Iter: {i}/{num_iters_per_epoch}, Loss: {loss.item()}")
+                    wandb.log({"loss": loss.item()})
+        log.info("Parent Model Training finished")
+        
+        save_path = os.path.join(f"{wandb.run.dir}", f"{args.dataset}_{args.model}_parent.pth")
+        torch.save(model_p.state_dict(), save_path)
+        log.info(f"Parenet Model saved to {save_path}")
     
     log.info("Starting Child Model Training...")
     for i, model_c in enumerate(model_c_list):
         log.info(f"Training Child Model {i}...")
         model_c.train()
         for epoch in range(args.child_epochs):
-            for i, (inputs, targets) in enumerate(train_loader):
+            for j, (inputs, targets) in enumerate(train_loader):
                 inputs, targets = inputs.to(device), targets.to(device)
                 
                 optimizer_c_list[i].zero_grad()
@@ -134,8 +139,8 @@ def train(args):
                 optimizer_c_list[i].step()
                 scheduler_c_list[i].step()
                 
-                if i % args.log_interval == 0:
-                    log.info(f"Epoch: {epoch}/{args.child_epochs}, Iter: {i}/{num_iters_per_epoch}, Loss: {loss.item()}")
+                if j % args.log_interval == 0:
+                    log.info(f"Epoch: {epoch}/{args.child_epochs}, Iter: {j}/{num_iters_per_epoch}, Loss: {loss.item()}")
                     wandb.log({"loss": loss.item()})
         log.info(f"Child Model {i} Training finished")
         

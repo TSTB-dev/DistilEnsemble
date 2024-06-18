@@ -35,10 +35,13 @@ def evaluate(args):
     num_classes = 10 if args.dataset == "cifar10" or args.dataset == "mnist" else 100
     
     log.info(f"Loading model: {args.model}")
-    model = get_model(args)
-    model.load_state_dict(torch.load(os.path.join(args.save_dir, f"{args.dataset}_{args.model}.pth")))
-    model.to(device)
-    model.eval()
+    ensembles = []
+    for i in range(args.num_ensembles):
+        model = get_model(args)
+        model.load_state_dict(torch.load(os.path.join(args.save_dir, f"{args.dataset}_{args.model}_child_{i}.pth")))
+        model.to(device)
+        model.eval()
+        ensembles.append(model)
     log.info("Model loaded")
     
     with torch.no_grad():
@@ -46,9 +49,11 @@ def evaluate(args):
         total = 0
         for inputs, labels in test_loader:
             inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)  # (B, G, C)
-            outputs = torch.mean(outputs, dim=1)  # (B, C)
-            _, predicted = torch.max(outputs, 1)
+            outputs = []
+            for j in range(args.num_ensembles):
+                outputs.append(ensembles[j](inputs))  # (B, C)
+            predicted = torch.mean(torch.stack(outputs, dim=0), dim=0)  # (B, C)
+            _, predicted = torch.max(predicted, 1) # (B, )
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
         whole_accuracy = correct / total
@@ -61,14 +66,21 @@ def evaluate(args):
             total_list = [0] * args.num_ensembles
             for inputs, labels in test_loader:
                 inputs, labels = inputs.to(device), labels.to(device)
-                outputs = model(inputs)  # (B, G, C)
-                for out in outputs.split(1, dim=1):
-                    out = out.squeeze(1)
+                
+                outputs = []
+                for j in range(args.num_ensembles):
+                    outputs.append(ensembles[j](inputs))  # (B, C)
+                outputs = torch.stack(outputs, dim=0)  # (M, B, C)
+                for j, out in enumerate(outputs.split(1, dim=0)):
+                    out = out.squeeze(0)  # (B, C)
                     _, predicted = torch.max(out, 1)
-                    total_list[0] += labels.size(0)
-                    correct_list[0] += (predicted == labels).sum().item()
+                    total_list[j] += labels.size(0)
+                    correct_list[j] += (predicted == labels).sum().item()
     
         acc_list = [correct / total for correct, total in zip(correct_list, total_list)]    
         for i, acc in enumerate(acc_list):
             log.info(f"Test Accuracy Single for Ensemble[{i}]: {acc}")
-    
+
+if __name__ == "__main__":
+    args = get_args()
+    evaluate(args)

@@ -1,0 +1,21 @@
+export CUDA_VISIBLE_DEVICES=0
+python3 ./src/train.py \
+    --dataset cifar10 \
+    --model resnet18 \
+    --batch_size 64 \
+    --parent_epochs 200 \
+    --child_epochs 50 \
+    --num_ensembles 10 \
+    --lambda_kd 0.5 \
+    --temperature 2.0 \
+    --scheduler_type cyclic_cosine \
+    --weight_decay 0.0005 \
+    --momentum 0.9 \
+    --max_lr 0.1 \
+    --min_lr 0.0 \
+    --optimizer sgd \
+    --device cuda \
+    --seed 0 \
+    --log_interval 100 \
+    --proj_name distil_ensemble  \
+    --parent_resume /home/sakai/projects/NDE/DistilEnsemble/wandb/run-20240617_162859-y6afwqog/files/cifar10_resnet18_parent.pth
